@@ -6,8 +6,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout,
                              QVBoxLayout, QPushButton, QFrame, QLabel, QFileDialog,
                              QProgressBar, QPlainTextEdit, QSplitter, QCheckBox, QMessageBox,
                              QSizePolicy)
-from PyQt6.QtCore import Qt, QTimer, QRect, QSize
-from PyQt6.QtGui import QPainter, QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QFontDatabase
+from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, QSize, pyqtSignal
+from PyQt6.QtGui import (QPainter, QBrush, QColor, QFont, QPixmap,
+                          QSyntaxHighlighter, QTextCharFormat, QFontDatabase)
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -156,28 +157,29 @@ class RobotController(QWidget):
         self.setWindowTitle(f"Editor: Robot_{robot.id}")
         self.resize(600, 750)
         self.is_dirty = False
-        
+        self._editor_font_size = 13
+
         main_layout = QVBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Vertical)
-        
+
         # Code Editor
         self.editor = QCodeEditor()
         self.highlighter = PythonHighlighter(self.editor.document())
         self.editor.setPlainText(self.robot.script)
         self.editor.textChanged.connect(self.on_text_changed)
         splitter.addWidget(self.editor)
-        
+
         # Output Console
         self.console = QPlainTextEdit()
         self.console.setReadOnly(True)
         self.console.setFont(get_monospaced_font(12))
         self.console.setStyleSheet("background:#000; color:#0f0;")
         splitter.addWidget(self.console)
-        
+
         splitter.setSizes([500, 200])
         main_layout.addWidget(splitter)
-        
-        # Execution Options
+
+        # Execution Options + font resize
         opt_layout = QHBoxLayout()
         self.loop_check = QCheckBox("Run forever")
         self.loop_check.setStyleSheet("color: white;")
@@ -185,20 +187,32 @@ class RobotController(QWidget):
         self.loop_check.stateChanged.connect(self.sync_loop_state)
         opt_layout.addWidget(self.loop_check)
         opt_layout.addStretch()
+
+        for label, delta in [("a", -1), ("A", +1)]:
+            fb = QPushButton(label)
+            fb.setFixedSize(28, 28)
+            fb.setStyleSheet(
+                f"QPushButton {{ background: #3A3A3C; color: white; border: none; "
+                f"border-radius: 6px; font-size: {'11px' if delta < 0 else '15px'}; font-weight: bold; }}"
+                f"QPushButton:hover {{ background: #555; }}"
+            )
+            fb.clicked.connect(lambda _, d=delta: self._adjust_editor_font(d))
+            opt_layout.addWidget(fb)
+
         main_layout.addLayout(opt_layout)
-        
+
         # Controls
         btn_layout = QHBoxLayout()
         self.toggle_btn = QPushButton("Run")
         self.toggle_btn.clicked.connect(self.handle_toggle)
         btn_layout.addWidget(self.toggle_btn)
-        
+
         for text, func in [("Open", self.file_open), ("Save", self.file_save), ("Clear", self.console.clear)]:
             btn = QPushButton(text)
             btn.clicked.connect(func)
             btn_layout.addWidget(btn)
         main_layout.addLayout(btn_layout)
-        
+
         self.update_ui_state()
 
     def on_text_changed(self):
@@ -227,6 +241,10 @@ class RobotController(QWidget):
         else:
             self.toggle_btn.setText("Run")
             self.toggle_btn.setStyleSheet("background-color: #080; color: white; font-weight: bold;")
+
+    def _adjust_editor_font(self, delta: int):
+        self._editor_font_size = max(8, min(32, self._editor_font_size + delta))
+        self.editor.setFont(get_monospaced_font(self._editor_font_size))
 
     def file_open(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Script", "", "Python (*.py)", options=QFileDialog.Option.DontUseNativeDialog)
@@ -302,20 +320,50 @@ class WorldObject:
             return np.sqrt(max(abs(lx) - self.w/2, 0)**2 + max(abs(ly) - self.d/2, 0)**2)
         return max(0, np.sqrt(dx**2 + dy**2) - self.w/2)
 
+def _make_lightbulb_pixmap(size=24, color="#FFFFFF"):
+    """Generate a simple lightbulb icon as a QPixmap."""
+    px = QPixmap(size, size)
+    px.fill(Qt.GlobalColor.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(QColor(color)))
+    sc = size / 24.0
+    # Bulb (circle)
+    p.drawEllipse(QRectF(3*sc, 2*sc, 18*sc, 15*sc))
+    # Base ridges
+    p.drawRect(QRectF(8*sc, 15.5*sc, 8*sc, 2*sc))
+    p.drawRect(QRectF(8*sc, 18.5*sc, 8*sc, 2*sc))
+    # Rounded cap
+    p.drawRoundedRect(QRectF(9.5*sc, 21*sc, 5*sc, 3*sc), 1.5*sc, 1.5*sc)
+    p.end()
+    return px
+
+
 class MainWindow(QMainWindow):
     """
-    The Core Engine. Manages the main 3D view, simulation loop, 
+    The Core Engine. Manages the main 3D view, simulation loop,
     collisions, and the Robot Scripting API.
     """
+    mission_completed = pyqtSignal(int)   # emits mission number (1-based)
+
     def __init__(self, startup_file=None):
         super().__init__()
         self.setWindowTitle("RoboSim")
         self.resize(1400, 950)
         
-        self.world = {'robots': [Robot(0)], 'objects': []}
+        self.world = {'robots': [Robot(0)], 'objects': [], 'zones': []}
         self.controllers = {}
         self.active_idx = 0
         self.keys = set()
+
+        # Mission tracking
+        self._mission_list = []        # full list of mission dicts from curriculum
+        self._mission_count = 0
+        self._active_mission = 0       # 0 = inactive; 1..N = current mission
+        self._mission_shown = False    # True while "Well done" bar is visible
+        self._mission_hold_frames = 0  # frames remaining before bar can be dismissed
+        self._drop_zones = {}          # zone_name -> (cx, cy, radius, (r,g,b))
         
         # Maps and rendering tools
         self.slam_map = np.zeros((500, 500))
@@ -348,17 +396,30 @@ class MainWindow(QMainWindow):
         main_vl.setContentsMargins(0, 0, 0, 0)
         main_vl.setSpacing(0)
 
-        instruction = QLabel("To move the robot, press A W D S keys on your keyboard.")
-        instruction.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
-        instruction.setStyleSheet("color: white; background: #222; padding: 2px; font-size: 18px; font-weight: bold;")
-        main_vl.addWidget(instruction, 5)
+        self._info_widget = QWidget()
+        self._info_widget.setStyleSheet("background: #222;")
+        _ihl = QHBoxLayout(self._info_widget)
+        _ihl.setContentsMargins(12, 2, 12, 2)
+        _ihl.setSpacing(10)
+        self._info_icon = QLabel()
+        self._info_icon.setFixedSize(24, 24)
+        self._info_icon.setVisible(False)
+        _ihl.addWidget(self._info_icon)
+        self._info_text = QLabel("To move the robot, press A W D S keys on your keyboard.")
+        self._info_text.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self._info_text.setStyleSheet("color: white; font-size: 15px; font-weight: bold; background: transparent;")
+        _ihl.addWidget(self._info_text, 1)
+        main_vl.addWidget(self._info_widget, 5)
 
         self.main_view = QOpenGLWidget()
+        self.main_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.main_view.initializeGL = self.init_gl
         self.main_view.paintGL = self.paint_main
         self.main_view.mousePressEvent = self.view_press
         self.main_view.mouseMoveEvent = self.view_move
         self.main_view.wheelEvent = self.view_zoom
+        self.main_view.keyPressEvent = self.keyPressEvent
+        self.main_view.keyReleaseEvent = self.keyReleaseEvent
         main_vl.addWidget(self.main_view, 90)
 
         layout.addWidget(main_area, 3)
@@ -403,7 +464,7 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.slam_ui, 1)
 
         # Buttons — anchored to the bottom
-        for text, func in [("OPEN CHAPTER", self.open_chapter), ("NEW ROBOT", self.spawn_robot), ("OPEN EDITOR", self.open_editor),
+        for text, func in [("NEW ROBOT", self.spawn_robot), ("CODE EDITOR", self.open_editor),
                            ("LOAD WORLD", self.load_world_dialog), ("ATTACH", self.manual_attach),
                            ("DETACH", self.manual_detach)]:
             btn = QPushButton(text)
@@ -488,6 +549,10 @@ class MainWindow(QMainWindow):
             self.draw_box(0.05, 5, 0.25)
             glPopMatrix()
             
+        # Draw drop zones (before objects so they appear underneath)
+        for cx, cy, zr, col in self._drop_zones.values():
+            self.draw_circle_ground(cx, cy, zr, col[0], col[1], col[2])
+
         # Draw Objects
         for o in self.world['objects']:
             glPushMatrix()
@@ -572,11 +637,16 @@ class MainWindow(QMainWindow):
             
             # Manual Control for Active Robot
             if r.id == self.active_idx:
+                moving = any(k in self.keys for k in (
+                    Qt.Key.Key_W, Qt.Key.Key_S, Qt.Key.Key_A, Qt.Key.Key_D))
+                if moving:
+                    self._dismiss_and_advance()
                 if r.energy > 0:
                     if Qt.Key.Key_W in self.keys: self.api_drive(r, 0.7, 0)
                     if Qt.Key.Key_S in self.keys: self.api_drive(r, -0.5, 0)
                     if Qt.Key.Key_A in self.keys: self.api_drive(r, 0, -0.6)
                     if Qt.Key.Key_D in self.keys: self.api_drive(r, 0, 0.6)
+                self._check_movement_missions(r)
                 self.side_bat.setValue(int(r.energy))
                 self.bat_label.setText(f"Battery: {int(r.energy)}%")
                 
@@ -606,6 +676,10 @@ class MainWindow(QMainWindow):
                         break
                 r.lidar_data[deg:deg+LIDAR_RES] = hit
                 
+        # Count down the mission-bar hold timer
+        if self._mission_hold_frames > 0:
+            self._mission_hold_frames -= 1
+
         # Trigger redraws
         self.main_view.update()
         self.pov.update()
@@ -729,24 +803,164 @@ class MainWindow(QMainWindow):
             glVertex2f(px, py)
         glEnd()
 
+    # --- DROP ZONES ---
+
+    def _setup_drop_zones(self):
+        """Build drop zone lookup from zones declared in the world file."""
+        self._drop_zones = {}
+        for name, cx, cy, radius, color in self.world.get('zones', []):
+            self._drop_zones[name] = (cx, cy, radius, color)
+
+    def _in_zone(self, robot, zone_key):
+        """True if the robot centre is inside the named drop zone."""
+        if zone_key not in self._drop_zones:
+            return False
+        cx, cy, zr, _ = self._drop_zones[zone_key]
+        return float(np.sqrt((robot.pos[0] - cx)**2 + (robot.pos[1] - cy)**2)) < zr
+
+    def draw_circle_ground(self, cx, cy, radius, r, g, b):
+        """Draw a translucent filled circle on the ground plane."""
+        segs = 48
+        glDisable(GL_LIGHTING)
+        # Filled disc
+        glColor4f(r, g, b, 0.18)
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(cx, cy, 0.01)
+        for i in range(segs + 1):
+            a = 2 * np.pi * i / segs
+            glVertex3f(cx + radius * np.cos(a), cy + radius * np.sin(a), 0.01)
+        glEnd()
+        # Solid outline
+        glColor4f(r, g, b, 0.85)
+        glLineWidth(2.5)
+        glBegin(GL_LINE_LOOP)
+        for i in range(segs):
+            a = 2 * np.pi * i / segs
+            glVertex3f(cx + radius * np.cos(a), cy + radius * np.sin(a), 0.01)
+        glEnd()
+        glLineWidth(1.0)
+        glEnable(GL_LIGHTING)
+
+    # --- MISSION SYSTEM ---
+
+    def set_missions(self, missions):
+        """Activate mission tracking. missions can be a list of dicts or a plain int."""
+        if isinstance(missions, int):
+            self._mission_list = [{}] * missions
+        else:
+            self._mission_list = list(missions)
+        self._mission_count = len(self._mission_list)
+        self._active_mission = 1 if self._mission_count > 0 else 0
+        self._mission_shown = False
+        self._reset_info_bar()
+        self._load_mission_script()
+
+    def _load_mission_script(self):
+        """Pre-load the current mission's starter code into the active robot's editor."""
+        idx = self._active_mission - 1
+        if idx < 0 or idx >= len(self._mission_list):
+            return
+        script = self._mission_list[idx].get("script", "")
+        if not script:
+            return
+        r = self.world['robots'][self.active_idx]
+        r.script = script
+        # Refresh editor live if it is already open
+        if r.id in self.controllers and self.controllers[r.id].isVisible():
+            self.controllers[r.id].editor.setPlainText(script)
+
+    def _get_obj(self, name):
+        for o in self.world['objects']:
+            if o.name == name:
+                return o
+        return None
+
+    def _robot_dist(self, robot, obj):
+        return float(np.sqrt((robot.pos[0] - obj.x)**2 + (robot.pos[1] - obj.y)**2))
+
+    def _check_movement_missions(self, robot):
+        """Check position-based mission conditions (called each frame)."""
+        if self._active_mission == 0 or self._mission_shown:
+            return
+        idx = self._active_mission - 1
+        if idx >= len(self._mission_list):
+            return
+        trigger = self._mission_list[idx].get("trigger", {})
+        t        = trigger.get("type", "")
+        zone     = trigger.get("zone", "")
+        obj_name = trigger.get("object", "")
+        if t == "enter" and zone:
+            if self._in_zone(robot, zone):
+                self._complete_mission(self._active_mission)
+        elif t == "enter_with" and zone and obj_name:
+            if (robot.attached_obj and
+                    robot.attached_obj.name == obj_name and
+                    self._in_zone(robot, zone)):
+                self._complete_mission(self._active_mission)
+
+    def _complete_mission(self, mission_num: int):
+        self._mission_shown = True
+        self._mission_hold_frames = 120   # ~2 s at 60 fps before dismissal allowed
+        self._show_mission_bar()
+        self.mission_completed.emit(mission_num)
+
+    def _dismiss_and_advance(self):
+        """Dismiss the 'Well done' bar and advance to the next mission."""
+        if self._mission_shown and self._mission_hold_frames <= 0:
+            self._mission_shown = False
+            self._active_mission += 1
+            if self._active_mission > self._mission_count:
+                self._active_mission = 0
+            self._reset_info_bar()
+            self._load_mission_script()
+
+    def _show_mission_bar(self):
+        self._info_text.setText(
+            "Well done! Mission accomplished. Now move on to the next mission.")
+        self._info_widget.setStyleSheet(
+            "background: #1B4D2E; border-bottom: 2px solid #30D158;")
+
+    def _reset_info_bar(self):
+        self._info_icon.setVisible(False)
+        self._info_text.setText(
+            "To move the robot, press A W D S keys on your keyboard.")
+        self._info_widget.setStyleSheet("background: #222;")
+
     # --- USER ACTIONS & UTILS ---
 
     def manual_attach(self, robot=None):
         """Attaches a robot to a nearby moveable object if it isn't already held."""
+        self._dismiss_and_advance()
         r = robot if robot else self.world['robots'][self.active_idx]
         if not r.attached_obj:
             for o in self.world['objects']:
                 if o.moveable and not o.is_held and o.get_dist_to_point(r.pos[0], r.pos[1]) < 0.65:
                     r.attached_obj = o
                     o.is_held = True
+                    idx = self._active_mission - 1
+                    if 0 <= idx < len(self._mission_list) and not self._mission_shown:
+                        trigger = self._mission_list[idx].get("trigger", {})
+                        if (trigger.get("type") == "attach" and
+                                trigger.get("object") == o.name and
+                                self._in_zone(r, trigger.get("zone", ""))):
+                            self._complete_mission(self._active_mission)
                     return
 
     def manual_detach(self, robot=None):
         """Detaches object and frees it for other robots."""
+        self._dismiss_and_advance()
         r = robot if robot else self.world['robots'][self.active_idx]
         if r.attached_obj:
+            held_name = r.attached_obj.name
             r.attached_obj.is_held = False
             r.attached_obj = None
+            idx = self._active_mission - 1
+            if 0 <= idx < len(self._mission_list) and not self._mission_shown:
+                trigger = self._mission_list[idx].get("trigger", {})
+                if (trigger.get("type") == "detach" and
+                        trigger.get("object") == held_name and
+                        self._in_zone(r, trigger.get("zone", ""))):
+                    self._complete_mission(self._active_mission)
 
     def spawn_robot(self):
         """Adds a new robot to the simulation in a clear spot."""
@@ -768,11 +982,6 @@ class MainWindow(QMainWindow):
         self.controllers[r.id].raise_()
         self.controllers[r.id].activateWindow()
 
-    def open_chapter(self):
-        chapters_dir = "/Users/wayneliu/Desktop/Playbook/Chapters"
-        path, _ = QFileDialog.getOpenFileName(self, "Open Chapter", chapters_dir, "Python (*.py)", options=QFileDialog.Option.DontUseNativeDialog)
-        if path:
-            self.load_world(path)
 
     def load_world_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open World", "/Users/wayneliu/Desktop/Playbook/RoboSim", "Python (*.py)", options=QFileDialog.Option.DontUseNativeDialog)
@@ -781,10 +990,19 @@ class MainWindow(QMainWindow):
 
     def load_world(self, path):
         self.world['objects'] = []
-        exec(open(path).read(), {"create_object": self.create_obj})
+        self.world['zones'] = []
+        exec(open(path).read(), {
+            "create_object": self.create_obj,
+            "create_zone":   self._create_zone_entry,
+        })
+        self._setup_drop_zones()
 
     def create_obj(self, name, o_type, color, physics, size, pos, orientation):
         self.world['objects'].append(WorldObject(name, o_type, color, physics, size, pos, orientation))
+
+    def _create_zone_entry(self, name, cx, cy, radius, color):
+        """Called by world files to register a named drop zone."""
+        self.world['zones'].append((name, cx, cy, radius, color))
 
     # --- INPUT EVENTS ---
 
@@ -801,6 +1019,7 @@ class MainWindow(QMainWindow):
         self.keys.discard(event.key())
 
     def view_press(self, e):
+        self.main_view.setFocus()
         self.last_m = e.position()
 
     def view_move(self, e):

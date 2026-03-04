@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QVBoxLayout, QWidget,
 )
 
-from curriculum import CHAPTERS, script_path
+from curriculum import CHAPTERS, script_path, world_path
 
 # ─── Embedded RoboSim ────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "RoboSim"))
@@ -31,7 +31,8 @@ from RobotSim5 import MainWindow as RoboSimWindow
 
 _APP_DIR       = os.path.dirname(os.path.abspath(__file__))
 _ROBOSIM       = os.path.join(_APP_DIR, "RoboSim")
-_GIT_CREDS_FILE = os.path.join(_APP_DIR, ".git_credentials.json")
+_GIT_CREDS_FILE  = os.path.join(_APP_DIR, ".git_credentials.json")
+_EDU_NOTES_FILE  = os.path.join(_APP_DIR, ".educator_notes.json")
 
 # ─── Colours ──────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,22 @@ C_PURPLE  = "#BF5AF2"
 C_RED     = "#FF453A"
 
 # ─── Shared styles ────────────────────────────────────────────────────────────
+
+# ─── Educator-notes persistence ───────────────────────────────────────────────
+
+def _load_edu_notes() -> dict:
+    try:
+        with open(_EDU_NOTES_FILE, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _save_edu_notes(notes: dict):
+    with open(_EDU_NOTES_FILE, "w", encoding="utf-8") as fh:
+        json.dump(notes, fh, indent=2)
+
+
+# ─── Shared button styles ─────────────────────────────────────────────────────
 
 _BTN_BLUE = f"""
     QPushButton {{
@@ -81,7 +98,8 @@ class CollapsibleSection(QWidget):
     """A labelled section with a ▶/▼ toggle that shows/hides its content."""
 
     def __init__(self, title: str, content_widget: QWidget,
-                 accent: str = C_ACCENT, collapsed: bool = True, parent=None):
+                 accent: str = C_ACCENT, collapsed: bool = True,
+                 font_delta: int = 0, parent=None):
         super().__init__(parent)
         self._collapsed = collapsed
 
@@ -97,11 +115,11 @@ class CollapsibleSection(QWidget):
         hl.setContentsMargins(14, 10, 14, 10)
 
         self._arrow = QLabel("▶" if collapsed else "▼")
-        self._arrow.setStyleSheet(f"color: {accent}; font-size: 11px;")
+        self._arrow.setStyleSheet(f"color: {accent}; font-size: 17px;")
         self._arrow.setFixedWidth(14)
 
         lbl = QLabel(title)
-        lbl.setFont(QFont("Helvetica Neue", 13, QFont.Weight.Bold))
+        lbl.setFont(QFont("Helvetica Neue", 20 + font_delta, QFont.Weight.Bold))
         lbl.setStyleSheet(f"color: {C_TEXT};")
 
         hl.addWidget(self._arrow)
@@ -135,7 +153,7 @@ class CollapsibleSection(QWidget):
 class MissionRow(QWidget):
     """One mission: checkbox, id, title, description, Open Script button."""
 
-    def __init__(self, mission: dict, on_open_script, parent=None):
+    def __init__(self, mission: dict, on_open_script, font_delta: int = 0, parent=None):
         super().__init__(parent)
         self._script = mission.get("script", "")
         self._on_open = on_open_script
@@ -155,24 +173,24 @@ class MissionRow(QWidget):
         top = QHBoxLayout()
         top.setSpacing(10)
 
-        self._check = QLabel("○")
+        self._check = QLabel("●")
         self._check.setFixedWidth(18)
-        self._check.setFont(QFont("Helvetica Neue", 14))
+        self._check.setFont(QFont("Helvetica Neue", 14 + font_delta))
         self._check.setStyleSheet(f"color: {C_SUB};")
         top.addWidget(self._check)
 
         id_lbl = QLabel(f"Mission {mission['id']}")
-        id_lbl.setFont(QFont("Helvetica Neue", 11, QFont.Weight.Bold))
+        id_lbl.setFont(QFont("Helvetica Neue", 17 + font_delta, QFont.Weight.Bold))
         id_lbl.setStyleSheet(f"color: {C_ACCENT};")
         top.addWidget(id_lbl)
 
         title_lbl = QLabel(mission["title"])
-        title_lbl.setFont(QFont("Helvetica Neue", 13, QFont.Weight.Medium))
+        title_lbl.setFont(QFont("Helvetica Neue", 20 + font_delta, QFont.Weight.Medium))
         title_lbl.setStyleSheet(f"color: {C_TEXT};")
         top.addWidget(title_lbl, stretch=1)
 
         if self._script:
-            open_btn = QPushButton("Open Script ▶")
+            open_btn = QPushButton("Starter Code ▶")
             open_btn.setStyleSheet(_BTN_GHOST)
             open_btn.setFixedHeight(28)
             open_btn.clicked.connect(self._open_script)
@@ -182,23 +200,18 @@ class MissionRow(QWidget):
 
         # Description
         desc = QLabel(mission["description"])
-        desc.setFont(QFont("Helvetica Neue", 12))
+        desc.setFont(QFont("Helvetica Neue", 18 + font_delta))
         desc.setStyleSheet(f"color: {C_SUB}; padding-left: 28px;")
         desc.setWordWrap(True)
         outer.addWidget(desc)
 
     def _open_script(self):
-        path = script_path(self._script)
         if self._on_open:
-            self._on_open(path, self._script)
+            self._on_open(self._script)
 
     def mark_complete(self, done: bool):
-        if done:
-            self._check.setText("✓")
-            self._check.setStyleSheet(f"color: {C_GREEN};")
-        else:
-            self._check.setText("○")
-            self._check.setStyleSheet(f"color: {C_SUB};")
+        color = C_GREEN if done else C_SUB
+        self._check.setStyleSheet(f"color: {color};")
 
 
 # ─── ScriptPanel ──────────────────────────────────────────────────────────────
@@ -232,12 +245,6 @@ class ScriptPanel(QWidget):
         copy_btn.clicked.connect(self._copy)
         hl.addWidget(copy_btn)
 
-        open_btn = QPushButton("Open in Editor")
-        open_btn.setStyleSheet(_BTN_BLUE + "QPushButton { padding: 3px 12px; font-size: 11px; }")
-        open_btn.setFixedHeight(26)
-        open_btn.clicked.connect(self._open_external)
-        hl.addWidget(open_btn)
-
         close_btn = QPushButton("✕")
         close_btn.setStyleSheet(_BTN_GHOST + "QPushButton { color: #8E8E93; padding: 3px 8px; }")
         close_btn.setFixedSize(28, 26)
@@ -261,16 +268,12 @@ class ScriptPanel(QWidget):
 
         self._current_path = ""
 
-    def load(self, path: str, filename: str):
-        self._current_path = path
-        self._title_lbl.setText(filename)
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                self._viewer.setPlainText(f.read())
-        except FileNotFoundError:
-            self._viewer.setPlainText(f"# File not found:\n# {path}")
+    def load_text(self, title: str, code: str):
+        """Display inline code text (no file needed)."""
+        self._current_path = ""
+        self._title_lbl.setText(title)
+        self._viewer.setPlainText(code)
         self.setVisible(True)
-        # Scroll to top
         self._viewer.verticalScrollBar().setValue(0)
 
     def _copy(self):
@@ -285,7 +288,7 @@ class ScriptPanel(QWidget):
 
 def _concept_chip(text: str) -> QLabel:
     lbl = QLabel(text)
-    lbl.setFont(QFont("Helvetica Neue", 11))
+    lbl.setFont(QFont("Helvetica Neue", 17))
     lbl.setStyleSheet(f"""
         color: {C_PURPLE};
         background: #2D1F3D;
@@ -344,30 +347,31 @@ class ChapterView(QWidget):
 
         # ── Chapter header ────────────────────────────────────────────────────
         num_lbl = QLabel("Introduction" if chapter['number'] == 0 else f"Chapter {chapter['number']}")
-        num_lbl.setFont(QFont("Helvetica Neue", 12 + d, QFont.Weight.Bold))
+        num_lbl.setFont(QFont("Helvetica Neue", 18 + d, QFont.Weight.Bold))
         num_lbl.setStyleSheet(f"color: {C_ACCENT};")
         self._vl.addWidget(num_lbl)
 
         title_lbl = QLabel(chapter["title"])
-        title_lbl.setFont(QFont("Helvetica Neue", 28 + d, QFont.Weight.Bold))
+        title_lbl.setFont(QFont("Helvetica Neue", 42 + d, QFont.Weight.Bold))
         title_lbl.setStyleSheet(f"color: {C_TEXT};")
         self._vl.addWidget(title_lbl)
 
         sub_lbl = QLabel(f'\u201c{chapter["subtitle"]}\u201d')
-        sub_lbl.setFont(QFont("Helvetica Neue", 15 + d))
+        sub_lbl.setFont(QFont("Helvetica Neue", 23 + d))
         sub_lbl.setStyleSheet(f"color: {C_SUB}; font-style: italic;")
         self._vl.addWidget(sub_lbl)
 
-        # World file badge
-        wf_row = QHBoxLayout()
-        wf_lbl = QLabel("World file:")
-        wf_lbl.setStyleSheet(f"color: {C_SUB}; font-size: 12px;")
-        wf_val = QLabel(chapter["world_file"])
-        wf_val.setStyleSheet(f"color: {C_ORANGE}; font-size: 12px; font-family: Menlo;")
-        wf_row.addWidget(wf_lbl)
-        wf_row.addWidget(wf_val)
-        wf_row.addStretch()
-        self._vl.addLayout(wf_row)
+        # World file badge (hidden when no world file assigned)
+        if chapter.get("world_file"):
+            wf_row = QHBoxLayout()
+            wf_lbl = QLabel("World file:")
+            wf_lbl.setStyleSheet(f"color: {C_SUB}; font-size: 12px;")
+            wf_val = QLabel(chapter["world_file"])
+            wf_val.setStyleSheet(f"color: {C_ORANGE}; font-size: 12px; font-family: Menlo;")
+            wf_row.addWidget(wf_lbl)
+            wf_row.addWidget(wf_val)
+            wf_row.addStretch()
+            self._vl.addLayout(wf_row)
 
         # Concepts chips
         chips_row = QWidget()
@@ -383,7 +387,7 @@ class ChapterView(QWidget):
 
         if not available:
             coming = QLabel("This chapter is coming soon.")
-            coming.setFont(QFont("Helvetica Neue", 15 + d))
+            coming.setFont(QFont("Helvetica Neue", 23 + d))
             coming.setStyleSheet(f"color: {C_SUB};")
             coming.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._vl.addWidget(coming)
@@ -391,11 +395,11 @@ class ChapterView(QWidget):
             return
 
         # ── Story ─────────────────────────────────────────────────────────────
-        story_hdr = _section_label("STORY")
+        story_hdr = _section_label("STORY", d)
         self._vl.addWidget(story_hdr)
 
         story_body = QLabel(chapter["story"])
-        story_body.setFont(QFont("Helvetica Neue", 14 + d))
+        story_body.setFont(QFont("Helvetica Neue", 21 + d))
         story_body.setStyleSheet(f"color: {C_TEXT}; line-height: 1.6;")
         story_body.setWordWrap(True)
         self._vl.addWidget(story_body)
@@ -403,45 +407,54 @@ class ChapterView(QWidget):
         self._vl.addWidget(_hline())
 
         # ── Missions ──────────────────────────────────────────────────────────
-        missions_hdr = _section_label("MISSIONS")
+        missions_hdr = _section_label("MISSIONS", d)
         self._vl.addWidget(missions_hdr)
 
         # Script panel (shared, shown below missions when Open Script clicked)
         self._script_panel = ScriptPanel()
 
+        self._mission_rows = []
         for m in chapter.get("missions", []):
-            row = MissionRow(m, on_open_script=self._on_open_script)
+            row = MissionRow(m, on_open_script=self._on_open_script, font_delta=d)
             self._vl.addWidget(row)
+            self._mission_rows.append(row)
 
         self._vl.addWidget(self._script_panel)
         self._vl.addWidget(_hline())
 
+        # ── Learning Outcomes (Teacher Mode only) ─────────────────────────────
+        self._lo_section = None
+        if chapter.get("learning_outcomes"):
+            self._lo_section = self._build_collapsible_text(
+                "Learning Outcomes",
+                chapter["learning_outcomes"],
+                accent=C_ACCENT,
+            )
+            self._lo_section.setVisible(teacher_mode)
+            self._vl.addWidget(self._lo_section)
+
         # ── Educator Notes (Teacher Mode only) ────────────────────────────────
-        self._edu_section = self._build_collapsible_text(
-            "Educator Notes",
-            chapter["educator_notes"],
-            accent=C_GREEN,
-        )
+        self._edu_section = self._build_edu_notes_section(chapter)
         self._edu_section.setVisible(teacher_mode)
         self._vl.addWidget(self._edu_section)
 
-        # ── Hardware Bridge ───────────────────────────────────────────────────
-        hw_section = self._build_collapsible_text(
-            "Hardware Bridge",
-            chapter["hardware_bridge"],
-            accent=C_ORANGE,
-        )
-        self._vl.addWidget(hw_section)
-
         self._vl.addStretch()
+
+    def mark_mission_done(self, mission_num: int):
+        """Mark mission at 1-based index as complete (green dot)."""
+        idx = mission_num - 1
+        if hasattr(self, "_mission_rows") and 0 <= idx < len(self._mission_rows):
+            self._mission_rows[idx].mark_complete(True)
 
     def set_teacher_mode(self, enabled: bool):
         self._teacher_mode = enabled
+        if hasattr(self, "_lo_section") and self._lo_section:
+            self._lo_section.setVisible(enabled)
         if hasattr(self, "_edu_section"):
             self._edu_section.setVisible(enabled)
 
-    def _on_open_script(self, path: str, filename: str):
-        self._script_panel.load(path, filename)
+    def _on_open_script(self, code: str):
+        self._script_panel.load_text("Starter Code", code)
         # Scroll to script panel
         QTimer.singleShot(50, self._scroll_to_script)
 
@@ -453,15 +466,64 @@ class ChapterView(QWidget):
             scroll.verticalScrollBar().setValue(pos - 20)
 
     def _build_collapsible_text(self, title: str, text: str, accent: str) -> CollapsibleSection:
+        d = self._font_delta
         body = QLabel(text)
-        body.setFont(QFont("Helvetica Neue", 13 + self._font_delta))
         body.setStyleSheet(
-            f"color: {C_TEXT}; font-family: Menlo; font-size: 12px;"
+            f"color: {C_TEXT}; font-family: 'Helvetica Neue'; font-size: {20 + d}px;"
             f" padding: 14px; background: #1A1A1C; border-radius: 0 0 8px 8px;"
         )
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        return CollapsibleSection(title, body, accent=accent, collapsed=True)
+        return CollapsibleSection(title, body, accent=accent, collapsed=True, font_delta=d)
+
+    def _build_edu_notes_section(self, chapter: dict) -> CollapsibleSection:
+        d = self._font_delta
+        chapter_key = str(chapter["number"])
+        saved_notes = _load_edu_notes()
+        has_saved = chapter_key in saved_notes
+        initial_text = saved_notes[chapter_key] if has_saved else chapter["educator_notes"]
+
+        body = QWidget()
+        body.setStyleSheet("background: #1A1A1C; border-radius: 0 0 8px 8px;")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(14, 12, 14, 12)
+        bl.setSpacing(8)
+
+        editor = QTextEdit()
+        editor.setPlainText(initial_text)
+        editor.setStyleSheet(f"""
+            QTextEdit {{
+                color: {C_TEXT}; background: #252527;
+                border: 1px solid {C_BORDER}; border-radius: 6px;
+                padding: 8px; font-family: 'Helvetica Neue'; font-size: {20 + d}px;
+            }}
+        """)
+        editor.setReadOnly(has_saved)
+        editor.setMinimumHeight(100)
+        bl.addWidget(editor)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        save_btn = QPushButton("Edit" if has_saved else "Save")
+        save_btn.setStyleSheet(_BTN_GREY + "QPushButton { padding: 3px 14px; font-size: 11px; }")
+        save_btn.setFixedHeight(28)
+        btn_row.addWidget(save_btn)
+        bl.addLayout(btn_row)
+
+        def _on_btn():
+            if editor.isReadOnly():
+                editor.setReadOnly(False)
+                save_btn.setText("Save")
+                editor.setFocus()
+            else:
+                notes = _load_edu_notes()
+                notes[chapter_key] = editor.toPlainText()
+                _save_edu_notes(notes)
+                editor.setReadOnly(True)
+                save_btn.setText("Edit")
+
+        save_btn.clicked.connect(_on_btn)
+        return CollapsibleSection("Educator Notes", body, accent=C_GREEN, collapsed=True, font_delta=d)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -473,9 +535,9 @@ def _hline() -> QFrame:
     return line
 
 
-def _section_label(text: str) -> QLabel:
+def _section_label(text: str, font_delta: int = 0) -> QLabel:
     lbl = QLabel(text)
-    lbl.setFont(QFont("Helvetica Neue", 11, QFont.Weight.Bold))
+    lbl.setFont(QFont("Helvetica Neue", 17 + font_delta, QFont.Weight.Bold))
     lbl.setStyleSheet(f"color: {C_SUB}; letter-spacing: 1px;")
     return lbl
 
@@ -494,23 +556,26 @@ class ChapterItem(QWidget):
 
         top = QHBoxLayout()
         self._num_lbl = QLabel("Introduction" if chapter['number'] == 0 else f"Chapter {chapter['number']}")
-        self._num_lbl.setFont(QFont("Helvetica Neue", 12, QFont.Weight.Bold))
+        self._num_lbl.setFont(QFont("Helvetica Neue", 18, QFont.Weight.Bold))
         self._num_lbl.setStyleSheet(f"color: {C_ACCENT if available else C_SUB};")
 
-        dot = QLabel("●")
-        dot.setStyleSheet(f"color: {dot_color}; font-size: 8px;")
-        dot.setFixedWidth(14)
+        self._dot = QLabel("●")
+        self._dot.setStyleSheet(f"color: {dot_color}; font-size: 8px;")
+        self._dot.setFixedWidth(14)
 
         top.addWidget(self._num_lbl)
         top.addStretch()
-        top.addWidget(dot)
+        top.addWidget(self._dot)
 
         self._title_lbl = QLabel(chapter["title"])
-        self._title_lbl.setFont(QFont("Helvetica Neue", 13))
+        self._title_lbl.setFont(QFont("Helvetica Neue", 20))
         self._title_lbl.setStyleSheet(f"color: {C_TEXT if available else C_SUB};")
 
         layout.addLayout(top)
         layout.addWidget(self._title_lbl)
+
+    def mark_visited(self):
+        self._dot.setStyleSheet(f"color: {C_SUB}; font-size: 8px;")
 
     def adjust_font(self, delta: int):
         for lbl in (self._num_lbl, self._title_lbl):
@@ -769,7 +834,7 @@ class GitPushDialog(QDialog):
         pat_row.addWidget(pat_help)
 
         self._branch = QComboBox()
-        self._branch.addItems(["main", "develop", "feature"])
+        self._branch.addItems(["main", "roboapps"])
         saved_branch = creds.get("branch", "main")
         idx = self._branch.findText(saved_branch)
         self._branch.setCurrentIndex(idx if idx >= 0 else 0)
@@ -836,7 +901,7 @@ class GitPullDialog(QDialog):
         form.setSpacing(10)
 
         self._branch = QComboBox()
-        self._branch.addItems(["main", "develop", "feature"])
+        self._branch.addItems(["main", "roboapps"])
         saved_branch = creds.get("branch", "main")
         idx = self._branch.findText(saved_branch)
         self._branch.setCurrentIndex(idx if idx >= 0 else 0)
@@ -874,6 +939,8 @@ class GitPullDialog(QDialog):
 # ─── Main window ─────────────────────────────────────────────────────────────
 
 class RobbyWindow(QMainWindow):
+    _DRIVE_KEYS = {Qt.Key.Key_W, Qt.Key.Key_A, Qt.Key.Key_S, Qt.Key.Key_D}
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Python Playbook")
@@ -882,6 +949,18 @@ class RobbyWindow(QMainWindow):
         self._current_index = 0
         self._build_ui()
         self._load_chapter(0)
+
+    def keyPressEvent(self, event):
+        if event.key() in self._DRIVE_KEYS:
+            self._robosim_win.keyPressEvent(event)
+        else:
+            super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() in self._DRIVE_KEYS:
+            self._robosim_win.keyReleaseEvent(event)
+        else:
+            super().keyReleaseEvent(event)
 
     def _build_ui(self):
         self.setStyleSheet(f"QMainWindow, QWidget#root {{ background: {C_BG}; }}")
@@ -939,11 +1018,6 @@ class RobbyWindow(QMainWindow):
         self._teacher_btn.clicked.connect(self._toggle_teacher_mode)
         tbl.addWidget(self._teacher_btn)
 
-        self._robosim_btn = QPushButton("Hide RoboSim")
-        self._robosim_btn.setFixedHeight(32)
-        self._robosim_btn.setStyleSheet(_BTN_BLUE + "QPushButton { padding: 0 16px; }")
-        self._robosim_btn.clicked.connect(self._toggle_robosim)
-        tbl.addWidget(self._robosim_btn)
 
         rl.addWidget(tb)
 
@@ -978,6 +1052,7 @@ class RobbyWindow(QMainWindow):
         sl.addWidget(self._chapter_list)
 
         # Populate sidebar
+        self._chapter_items = []
         for ch in CHAPTERS:
             item = QListWidgetItem()
             w = ChapterItem(ch)
@@ -986,13 +1061,14 @@ class RobbyWindow(QMainWindow):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self._chapter_list.addItem(item)
             self._chapter_list.setItemWidget(item, w)
+            self._chapter_items.append(w)
 
         self._sidebar = sidebar
         splitter.addWidget(sidebar)
 
         # Right panel — nested splitter (chapter view | robosim)
         self._right_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._right_splitter.setStyleSheet(f"QSplitter::handle {{ background: {C_BORDER}; width: 1px; }}")
+        self._right_splitter.setStyleSheet("QSplitter::handle { width: 0px; background: transparent; }")
 
         # Chapter container with header bar
         chapter_container = QWidget()
@@ -1071,6 +1147,7 @@ class RobbyWindow(QMainWindow):
         robosim_vl.addWidget(robosim_header)
 
         self._robosim_win = RoboSimWindow()
+        self._robosim_win.mission_completed.connect(self._on_mission_complete)
         robosim_vl.addWidget(self._robosim_win)
 
         self._robosim_container = robosim_container
@@ -1085,10 +1162,21 @@ class RobbyWindow(QMainWindow):
 
     def _load_chapter(self, index: int):
         self._current_index = index
-        self._chapter_view.load(CHAPTERS[index], self._teacher_mode)
+        chapter = CHAPTERS[index]
+        self._chapter_view.load(chapter, self._teacher_mode)
         self._chapter_list.blockSignals(True)
         self._chapter_list.setCurrentRow(index)
         self._chapter_list.blockSignals(False)
+        self._chapter_items[index].mark_visited()
+        wf = chapter.get("world_file", "")
+        if wf:
+            path = world_path(wf)
+            if os.path.isfile(path):
+                self._robosim_win.load_world(path)
+        self._robosim_win.set_missions(chapter.get("missions", []))
+
+    def _on_mission_complete(self, mission_num: int):
+        self._chapter_view.mark_mission_done(mission_num)
 
     def _on_chapter_changed(self, row: int):
         if 0 <= row < len(CHAPTERS):
@@ -1155,21 +1243,6 @@ class RobbyWindow(QMainWindow):
         else:
             self._teacher_btn.setStyleSheet(_BTN_GREY + "QPushButton { padding: 0 16px; }")
         self._chapter_view.set_teacher_mode(self._teacher_mode)
-
-    def _toggle_robosim(self):
-        if self._robosim_win.isVisible():
-            self._saved_robosim_sizes = self._right_splitter.sizes()
-            self._robosim_win.setVisible(False)
-            self._robosim_btn.setText("Show RoboSim")
-        else:
-            self._robosim_win.setVisible(True)
-            sizes = getattr(self, "_saved_robosim_sizes", None)
-            if sizes:
-                self._right_splitter.setSizes(sizes)
-            else:
-                w = self._right_splitter.width()
-                self._right_splitter.setSizes([w // 2, w // 2])
-            self._robosim_btn.setText("Hide RoboSim")
 
     # ── Git / GitHub ──────────────────────────────────────────────────────────
 
