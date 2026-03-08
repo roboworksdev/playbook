@@ -5,20 +5,39 @@ import numpy as np
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout,
                              QVBoxLayout, QPushButton, QFrame, QLabel, QFileDialog,
                              QProgressBar, QPlainTextEdit, QSplitter, QCheckBox, QMessageBox,
-                             QSizePolicy)
+                             QSizePolicy, QLineEdit, QComboBox)
 from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, QSize, pyqtSignal
 from PyQt6.QtGui import (QPainter, QBrush, QColor, QFont, QPixmap,
-                          QSyntaxHighlighter, QTextCharFormat, QFontDatabase)
+                          QSyntaxHighlighter, QTextCharFormat, QFontDatabase,
+                          QPainterPath)
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from OpenGL.GLU import *
+
+def _make_down_arrow_path():
+    """Generate a white downward-triangle PNG for the combo-box arrow and return its path."""
+    import tempfile, os
+    dest = os.path.join(tempfile.gettempdir(), "robosim_combo_arrow.png")
+    pm = QPixmap(14, 9)
+    pm.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path = QPainterPath()
+    path.moveTo(0, 0)
+    path.lineTo(14, 0)
+    path.lineTo(7, 9)
+    path.closeSubpath()
+    p.fillPath(path, QBrush(QColor("white")))
+    p.end()
+    pm.save(dest)
+    return dest
 
 # --- GLOBAL SIMULATION CONSTANTS ---
 LIDAR_RANGE = 15.0
 LIDAR_RES = 2
 ROBOT_RADIUS = 0.25
-MAX_LIN_SPEED = 0.12
-MAX_ANG_SPEED = 5.0
+MAX_LIN_SPEED = 0.075
+MAX_ANG_SPEED = 3.125
 
 # Visual configurations
 ROBOT_COLORS = [(0, 1, 1), (1, 0, 1), (1, 0.5, 0), (0, 1, 0), (0.6, 0.2, 1)]
@@ -69,6 +88,11 @@ class PythonHighlighter(QSyntaxHighlighter):
         num_fmt = QTextCharFormat()
         num_fmt.setForeground(QColor("#b5cea8"))
         self.rules.append(("\\b[0-9]+\\.?[0-9]*\\b", num_fmt))
+
+        # Comment format (green)
+        comment_fmt = QTextCharFormat()
+        comment_fmt.setForeground(QColor("#4ec94e"))
+        self.rules.append(("#[^\n]*", comment_fmt))
 
     def highlightBlock(self, text):
         import re
@@ -201,11 +225,31 @@ class RobotController(QWidget):
 
         main_layout.addLayout(opt_layout)
 
+        # Immediate Command
+        cmd_layout = QHBoxLayout()
+        cmd_label = QLabel("Immediate Command")
+        cmd_label.setStyleSheet("color: #aaa; font-size: 11px;")
+        cmd_layout.addWidget(cmd_label)
+        self.cmd_input = QLineEdit()
+        self.cmd_input.setPlaceholderText("Enter a Python command and press Enter…")
+        self.cmd_input.setFont(get_monospaced_font(12))
+        self.cmd_input.setMinimumHeight(37)
+        self.cmd_input.setStyleSheet(
+            "background:#1e1e1e; color:#d4d4d4; border:1px solid #444; "
+            "padding:2px 8px; border-radius:8px;")
+        self.cmd_input.returnPressed.connect(self.execute_immediate)
+        cmd_layout.addWidget(self.cmd_input)
+        main_layout.addLayout(cmd_layout)
+
         # Controls
         btn_layout = QHBoxLayout()
         self.toggle_btn = QPushButton("Run")
         self.toggle_btn.clicked.connect(self.handle_toggle)
         btn_layout.addWidget(self.toggle_btn)
+
+        reset_btn = QPushButton("Reset")
+        reset_btn.clicked.connect(self.sim.reset_world)
+        btn_layout.addWidget(reset_btn)
 
         for text, func in [("Open", self.file_open), ("Save", self.file_save), ("Clear", self.console.clear)]:
             btn = QPushButton(text)
@@ -261,6 +305,40 @@ class RobotController(QWidget):
             return True
         return False
 
+    def execute_immediate(self):
+        """Execute a one-off command immediately on the robot without touching the editor."""
+        cmd = self.cmd_input.text().strip()
+        if not cmd:
+            return
+        r = self.robot
+        buf = io.StringIO()
+        api = {
+            "drive":            lambda l, a: self.sim.api_drive(r, l, a),
+            "holding":          lambda: r.attached_obj is not None,
+            "close_enough":     lambda: any(
+                o.moveable and not o.is_held and o.get_dist_to_point(r.pos[0], r.pos[1]) < 0.65
+                for o in self.sim.world['objects']),
+            "attach":           lambda: self.sim.manual_attach(r),
+            "detach":           lambda: self.sim.manual_detach(r),
+            "distance":         lambda a: float(r.lidar_data[int(a % 360)]),
+            "look":             lambda: self.sim.api_look(r),
+            "battery_level":    lambda: int(r.energy),
+            "transform_to_map": lambda d, a: [
+                float(r.pos[0] + d * np.sin(np.radians(r.yaw + a))),
+                float(r.pos[1] + d * np.cos(np.radians(r.yaw + a)))],
+            "self": r, "np": np,
+            "print": lambda *args: buf.write(" ".join(map(str, args)) + "\n"),
+        }
+        self.console.appendPlainText(f">>> {cmd}")
+        try:
+            exec(cmd, api)
+            out = buf.getvalue().strip()
+            if out:
+                self.console.appendPlainText(out)
+        except Exception as e:
+            self.console.appendPlainText(f"Error: {e}")
+        self.cmd_input.clear()
+
     def closeEvent(self, event):
         """Confirmation dialog when closing with unsaved changes."""
         if self.is_dirty:
@@ -291,7 +369,7 @@ class Robot:
         self.lidar_data = np.zeros(360)
         self.script = "print(f'Battery: {battery_level()}%')\ndrive(0.5, 0.0)"
         self.is_running = False
-        self.run_forever = False
+        self.run_forever = True
 
 class WorldObject:
     """
@@ -398,17 +476,76 @@ class MainWindow(QMainWindow):
 
         self._info_widget = QWidget()
         self._info_widget.setStyleSheet("background: #222;")
-        _ihl = QHBoxLayout(self._info_widget)
-        _ihl.setContentsMargins(12, 2, 12, 2)
-        _ihl.setSpacing(10)
-        self._info_icon = QLabel()
-        self._info_icon.setFixedSize(24, 24)
-        self._info_icon.setVisible(False)
-        _ihl.addWidget(self._info_icon)
-        self._info_text = QLabel("To move the robot, press A W D S keys on your keyboard.")
-        self._info_text.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self._info_text.setStyleSheet("color: white; font-size: 15px; font-weight: bold; background: transparent;")
-        _ihl.addWidget(self._info_text, 1)
+        _ivl = QVBoxLayout(self._info_widget)
+        _ivl.setContentsMargins(12, 10, 12, 8)
+        _ivl.setSpacing(8)
+
+        # ── Mission nav row (always visible) ─────────────────────────────────
+        _nav_btn_style = (
+            "QPushButton { background: black; color: white; border: 1px solid #444; "
+            "border-radius: 8px; font-size: 14px; font-weight: 600; padding: 4px 18px; }"
+            "QPushButton:hover { background: #1a1a1a; }"
+            "QPushButton:disabled { background: #2a2a2a; color: #555; border-color: #333; }"
+        )
+        _nav_row = QWidget()
+        _nav_row.setStyleSheet("background: transparent;")
+        _nhl = QHBoxLayout(_nav_row)
+        _nhl.setContentsMargins(0, 0, 0, 0)
+        _nhl.setSpacing(8)
+
+        self._back_btn = QPushButton("Back")
+        self._back_btn.setStyleSheet(_nav_btn_style)
+        self._back_btn.setFixedHeight(32)
+        self._back_btn.clicked.connect(self._mission_go_back)
+        _nhl.addWidget(self._back_btn)
+
+        # Mission drop-down
+        _arrow_file = _make_down_arrow_path()
+        self._mission_combo = QComboBox()
+        self._mission_combo.setFixedHeight(32)
+        self._mission_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: black; color: white; border: 1px solid #444;
+                border-radius: 8px; font-size: 14px; font-weight: 600;
+                padding: 2px 28px 2px 12px;
+            }}
+            QComboBox:hover {{ background: #1a1a1a; }}
+            QComboBox::drop-down {{ border: none; width: 28px; }}
+            QComboBox::down-arrow {{
+                image: url({_arrow_file}); width: 14px; height: 9px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: #1a1a1a; color: white;
+                selection-background-color: #333;
+                border: 1px solid #444; border-radius: 6px;
+                font-size: 14px; padding: 4px;
+            }}
+        """)
+        # Centre-align the displayed text
+        self._mission_combo.setEditable(True)
+        self._mission_combo.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mission_combo.lineEdit().setReadOnly(True)
+        self._mission_combo.lineEdit().setStyleSheet(
+            "background: transparent; color: white; border: none;")
+        self._mission_combo.activated.connect(self._on_combo_mission_selected)
+        _nhl.addWidget(self._mission_combo, 1)
+
+        self._next_btn = QPushButton("Next Mission")
+        self._next_btn.setStyleSheet(_nav_btn_style)
+        self._next_btn.setFixedHeight(32)
+        self._next_btn.clicked.connect(self._mission_go_next)
+        _nhl.addWidget(self._next_btn)
+
+        _ivl.addWidget(_nav_row)
+
+        # ── Congrats row (hidden until mission complete) ──────────────────────
+        self._congrats_lbl = QLabel("Congrats! Mission accomplished.")
+        self._congrats_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._congrats_lbl.setStyleSheet(
+            "color: #30D158; font-size: 23px; font-weight: bold; background: transparent;")
+        self._congrats_lbl.setVisible(False)
+        _ivl.addWidget(self._congrats_lbl)
+
         main_vl.addWidget(self._info_widget, 5)
 
         self.main_view = QOpenGLWidget()
@@ -464,7 +601,7 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.slam_ui, 1)
 
         # Buttons — anchored to the bottom
-        for text, func in [("NEW ROBOT", self.spawn_robot), ("CODE EDITOR", self.open_editor),
+        for text, func in [("CODE EDITOR", self.open_editor), ("NEW ROBOT", self.spawn_robot),
                            ("LOAD WORLD", self.load_world_dialog), ("ATTACH", self.manual_attach),
                            ("DETACH", self.manual_detach)]:
             btn = QPushButton(text)
@@ -852,7 +989,7 @@ class MainWindow(QMainWindow):
         self._mission_count = len(self._mission_list)
         self._active_mission = 1 if self._mission_count > 0 else 0
         self._mission_shown = False
-        self._reset_info_bar()
+        self._rebuild_mission_nav()
         self._load_mission_script()
 
     def _load_mission_script(self):
@@ -903,6 +1040,15 @@ class MainWindow(QMainWindow):
         self._mission_hold_frames = 120   # ~2 s at 60 fps before dismissal allowed
         self._show_mission_bar()
         self.mission_completed.emit(mission_num)
+        # Immediately populate the next mission's starter code into the editor
+        next_idx = mission_num  # mission_num is 1-based; next mission is at 0-based index mission_num
+        if next_idx < len(self._mission_list):
+            script = self._mission_list[next_idx].get("script", "")
+            if script:
+                r = self.world['robots'][self.active_idx]
+                r.script = script
+                if r.id in self.controllers and self.controllers[r.id].isVisible():
+                    self.controllers[r.id].editor.setPlainText(script)
 
     def _dismiss_and_advance(self):
         """Dismiss the 'Well done' bar and advance to the next mission."""
@@ -914,17 +1060,65 @@ class MainWindow(QMainWindow):
             self._reset_info_bar()
             self._load_mission_script()
 
+    def _rebuild_mission_nav(self):
+        """Repopulate the mission drop-down whenever missions change."""
+        self._mission_combo.blockSignals(True)
+        self._mission_combo.clear()
+        for i in range(self._mission_count):
+            self._mission_combo.addItem(f"Mission {i + 1}")
+        # Re-apply centre alignment after items are added
+        self._mission_combo.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mission_combo.blockSignals(False)
+        self._update_mission_nav()
+
+    def _update_mission_nav(self):
+        """Sync drop-down selection and button states to current active mission."""
+        self._back_btn.setEnabled(self._active_mission > 1)
+        self._next_btn.setEnabled(self._active_mission < self._mission_count)
+        if self._mission_count > 0 and self._active_mission > 0:
+            self._mission_combo.blockSignals(True)
+            self._mission_combo.setCurrentIndex(self._active_mission - 1)
+            self._mission_combo.blockSignals(False)
+
+    def _on_combo_mission_selected(self, index):
+        self._navigate_to_mission(index + 1)
+
+    def _navigate_to_mission(self, n):
+        """Jump directly to mission n."""
+        if 1 <= n <= self._mission_count:
+            self._mission_shown = False
+            self._active_mission = n
+            self._congrats_lbl.setVisible(False)
+            self._update_mission_nav()
+            self._load_mission_script()
+
     def _show_mission_bar(self):
-        self._info_text.setText(
-            "Well done! Mission accomplished. Now move on to the next mission.")
-        self._info_widget.setStyleSheet(
-            "background: #1B4D2E; border-bottom: 2px solid #30D158;")
+        self._congrats_lbl.setVisible(True)
+        self._update_mission_nav()
 
     def _reset_info_bar(self):
-        self._info_icon.setVisible(False)
-        self._info_text.setText(
-            "To move the robot, press A W D S keys on your keyboard.")
-        self._info_widget.setStyleSheet("background: #222;")
+        self._congrats_lbl.setVisible(False)
+        self._update_mission_nav()
+
+    def _mission_go_next(self):
+        """Advance to the next mission."""
+        self._mission_shown = False
+        self._active_mission += 1
+        if self._active_mission > self._mission_count:
+            self._active_mission = 0
+        self._congrats_lbl.setVisible(False)
+        self._update_mission_nav()
+        self._load_mission_script()
+
+    def _mission_go_back(self):
+        """Go back to the previous mission."""
+        if self._active_mission <= 1:
+            return
+        self._mission_shown = False
+        self._active_mission -= 1
+        self._congrats_lbl.setVisible(False)
+        self._update_mission_nav()
+        self._load_mission_script()
 
     # --- USER ACTIONS & UTILS ---
 
@@ -982,6 +1176,21 @@ class MainWindow(QMainWindow):
         self.controllers[r.id].raise_()
         self.controllers[r.id].activateWindow()
 
+    def run_active(self):
+        """Start the active robot running (without requiring the editor to be open)."""
+        r = self.world['robots'][self.active_idx]
+        if not r.is_running:
+            r.is_running = True
+            if r.id in self.controllers:
+                self.controllers[r.id].update_ui_state()
+
+    def stop_active(self):
+        """Stop the active robot (without requiring the editor to be open)."""
+        r = self.world['robots'][self.active_idx]
+        if r.is_running:
+            r.is_running = False
+            if r.id in self.controllers:
+                self.controllers[r.id].update_ui_state()
 
     def load_world_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open World", "/Users/wayneliu/Desktop/Playbook/RoboSim", "Python (*.py)", options=QFileDialog.Option.DontUseNativeDialog)
@@ -989,13 +1198,31 @@ class MainWindow(QMainWindow):
             self.load_world(path)
 
     def load_world(self, path):
+        self._current_world_path = path
         self.world['objects'] = []
         self.world['zones'] = []
         exec(open(path).read(), {
-            "create_object": self.create_obj,
-            "create_zone":   self._create_zone_entry,
+            "create_object":   self.create_obj,
+            "create_zone":     self._create_zone_entry,
+            "set_robot_pos":   self._set_robot_pos,
         })
         self._setup_drop_zones()
+
+    def reset_world(self):
+        """Reload the current world file, restoring all positions to their initial state."""
+        if hasattr(self, '_current_world_path') and self._current_world_path:
+            r = self.world['robots'][self.active_idx]
+            r.is_running = False
+            r.attached_obj = None
+            if r.id in self.controllers:
+                self.controllers[r.id].update_ui_state()
+            self.load_world(self._current_world_path)
+
+    def _set_robot_pos(self, x: float, y: float, yaw: float = 0.0):
+        """Called by world files to place the active robot at a specific position."""
+        r = self.world['robots'][self.active_idx]
+        r.pos = np.array([float(x), float(y)])
+        r.yaw = float(yaw)
 
     def create_obj(self, name, o_type, color, physics, size, pos, orientation):
         self.world['objects'].append(WorldObject(name, o_type, color, physics, size, pos, orientation))

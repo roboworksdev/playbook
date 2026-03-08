@@ -150,10 +150,20 @@ class CollapsibleSection(QWidget):
 
 # ─── MissionRow ───────────────────────────────────────────────────────────────
 
-class MissionRow(QWidget):
-    """One mission: checkbox, id, title, description, Open Script button."""
+_BTN_WHITE = f"""
+    QPushButton {{
+        background: black; color: white; border: 1px solid #444;
+        border-radius: 8px; font-size: 12px; padding: 5px 14px; font-weight: 600;
+    }}
+    QPushButton:hover {{ background: #1a1a1a; }}
+    QPushButton:disabled {{ background: #2a2a2a; color: #555; border-color: #333; }}
+"""
 
-    def __init__(self, mission: dict, on_open_script, font_delta: int = 0, parent=None):
+class MissionRow(QWidget):
+    """One mission: checkbox, id, title, description, action buttons."""
+
+    def __init__(self, mission: dict, on_open_script, font_delta: int = 0,
+                 on_open_editor=None, on_run=None, on_stop=None, on_reset=None, parent=None):
         super().__init__(parent)
         self._script = mission.get("script", "")
         self._on_open = on_open_script
@@ -179,7 +189,7 @@ class MissionRow(QWidget):
         self._check.setStyleSheet(f"color: {C_SUB};")
         top.addWidget(self._check)
 
-        id_lbl = QLabel(f"Mission {mission['id']}")
+        id_lbl = QLabel(mission['id'])
         id_lbl.setFont(QFont("Helvetica Neue", 17 + font_delta, QFont.Weight.Bold))
         id_lbl.setStyleSheet(f"color: {C_ACCENT};")
         top.addWidget(id_lbl)
@@ -201,9 +211,45 @@ class MissionRow(QWidget):
         # Description
         desc = QLabel(mission["description"])
         desc.setFont(QFont("Helvetica Neue", 18 + font_delta))
-        desc.setStyleSheet(f"color: {C_SUB}; padding-left: 28px;")
+        desc.setStyleSheet(f"color: {C_TEXT}; padding-left: 28px;")
         desc.setWordWrap(True)
         outer.addWidget(desc)
+
+        # Action buttons row
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(28, 6, 0, 0)
+        btn_row.setSpacing(8)
+
+        editor_btn = QPushButton("Code Editor")
+        editor_btn.setStyleSheet(_BTN_WHITE)
+        editor_btn.setFixedHeight(30)
+        if on_open_editor:
+            editor_btn.clicked.connect(on_open_editor)
+        btn_row.addWidget(editor_btn)
+
+        run_btn = QPushButton("Run")
+        run_btn.setStyleSheet(_BTN_WHITE)
+        run_btn.setFixedHeight(30)
+        if on_run:
+            run_btn.clicked.connect(on_run)
+        btn_row.addWidget(run_btn)
+
+        stop_btn = QPushButton("Stop")
+        stop_btn.setStyleSheet(_BTN_WHITE)
+        stop_btn.setFixedHeight(30)
+        if on_stop:
+            stop_btn.clicked.connect(on_stop)
+        btn_row.addWidget(stop_btn)
+
+        reset_btn = QPushButton("Reset")
+        reset_btn.setStyleSheet(_BTN_WHITE)
+        reset_btn.setFixedHeight(30)
+        if on_reset:
+            reset_btn.clicked.connect(on_reset)
+        btn_row.addWidget(reset_btn)
+
+        btn_row.addStretch()
+        outer.addLayout(btn_row)
 
     def _open_script(self):
         if self._on_open:
@@ -239,6 +285,20 @@ class ScriptPanel(QWidget):
         self._title_lbl.setStyleSheet(f"color: {C_TEXT};")
         hl.addWidget(self._title_lbl, stretch=1)
 
+        font_sm_btn = QPushButton("a")
+        font_sm_btn.setStyleSheet(_BTN_GREY + "QPushButton { padding: 3px 8px; font-size: 11px; }")
+        font_sm_btn.setFixedHeight(26)
+        font_sm_btn.setToolTip("Decrease font size")
+        font_sm_btn.clicked.connect(lambda: self._adjust_font(-1))
+        hl.addWidget(font_sm_btn)
+
+        font_lg_btn = QPushButton("A")
+        font_lg_btn.setStyleSheet(_BTN_GREY + "QPushButton { padding: 3px 8px; font-size: 15px; font-weight: bold; }")
+        font_lg_btn.setFixedHeight(26)
+        font_lg_btn.setToolTip("Increase font size")
+        font_lg_btn.clicked.connect(lambda: self._adjust_font(+1))
+        hl.addWidget(font_lg_btn)
+
         copy_btn = QPushButton("Copy")
         copy_btn.setStyleSheet(_BTN_GREY + "QPushButton { padding: 3px 12px; font-size: 11px; }")
         copy_btn.setFixedHeight(26)
@@ -254,9 +314,10 @@ class ScriptPanel(QWidget):
         layout.addWidget(hdr)
 
         # Code viewer
+        self._font_size = 12
         self._viewer = QTextEdit()
         self._viewer.setReadOnly(True)
-        self._viewer.setFont(QFont("Menlo", 12))
+        self._viewer.setFont(QFont("Menlo", self._font_size))
         self._viewer.setStyleSheet(f"""
             QTextEdit {{
                 background: #1A1A1C; color: #E5E5EA;
@@ -275,6 +336,10 @@ class ScriptPanel(QWidget):
         self._viewer.setPlainText(code)
         self.setVisible(True)
         self._viewer.verticalScrollBar().setValue(0)
+
+    def _adjust_font(self, delta: int):
+        self._font_size = max(8, min(24, self._font_size + delta))
+        self._viewer.setFont(QFont("Menlo", self._font_size))
 
     def _copy(self):
         QApplication.clipboard().setText(self._viewer.toPlainText())
@@ -309,6 +374,10 @@ class ChapterView(QWidget):
         self._teacher_mode = False
         self._font_delta = 0
         self._current_chapter = None
+        self._robosim_win = None
+
+    def set_robosim(self, win):
+        self._robosim_win = win
 
         # Outer scroll area
         scroll = QScrollArea()
@@ -414,8 +483,17 @@ class ChapterView(QWidget):
         self._script_panel = ScriptPanel()
 
         self._mission_rows = []
+        rsw = self._robosim_win
         for m in chapter.get("missions", []):
-            row = MissionRow(m, on_open_script=self._on_open_script, font_delta=d)
+            row = MissionRow(
+                m,
+                on_open_script=self._on_open_script,
+                font_delta=d,
+                on_open_editor=rsw.open_editor if rsw else None,
+                on_run=rsw.run_active if rsw else None,
+                on_stop=rsw.stop_active if rsw else None,
+                on_reset=rsw.reset_world if rsw else None,
+            )
             self._vl.addWidget(row)
             self._mission_rows.append(row)
 
@@ -523,7 +601,7 @@ class ChapterView(QWidget):
                 save_btn.setText("Edit")
 
         save_btn.clicked.connect(_on_btn)
-        return CollapsibleSection("Educator Notes", body, accent=C_GREEN, collapsed=True, font_delta=d)
+        return CollapsibleSection("Notes", body, accent=C_GREEN, collapsed=True, font_delta=d)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1011,7 +1089,7 @@ class RobbyWindow(QMainWindow):
 
         tbl.addStretch()
 
-        self._teacher_btn = QPushButton("Teacher Mode")
+        self._teacher_btn = QPushButton("Notes")
         self._teacher_btn.setCheckable(True)
         self._teacher_btn.setFixedHeight(32)
         self._teacher_btn.setStyleSheet(_BTN_GREY + "QPushButton { padding: 0 16px; }")
@@ -1149,6 +1227,7 @@ class RobbyWindow(QMainWindow):
         self._robosim_win = RoboSimWindow()
         self._robosim_win.mission_completed.connect(self._on_mission_complete)
         robosim_vl.addWidget(self._robosim_win)
+        self._chapter_view.set_robosim(self._robosim_win)
 
         self._robosim_container = robosim_container
         self._right_splitter.addWidget(self._robosim_container)

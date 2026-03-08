@@ -97,236 +97,160 @@ CHAPTERS = [
             "4. Student should grasp basic concepts of robot sensors such as "
             "camera and laser sensor."
         ),
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 1 ─────────────────────────────────────────────────────────────
     {
         "number":     1,
-        "title":      "Python Basics",
-        "subtitle":   "Variables, input and output.",
+        "title":      "Conditional Statements",
+        "subtitle":   "Teaching your program to make decisions.",
         "status":     "available",
-        "world_file": "chapter1_coffeeshop.py",
-        "concepts":   ["variables", "input()", "print()", "data types", "assignment"],
+        "world_file": "chapter1_kitchen_wall.py",
+        "concepts":   ["if", "elif", "else", "Boolean expressions", "comparison operators"],
         "story": (
-            "Robby the Robot is on duty at the coffee shop. A customer has placed "
-            "an order, and it's up to you to help Robby deliver it.\n\n"
-            "First, guide Robby to the counter to pick up the freshly brewed coffee. "
-            "Then carry it carefully across the shop to the customer's table and set "
-            "it down. Once the customer is happy, collect the dirty plate they left "
-            "behind and bring it back to the kitchen hatch.\n\n"
-            "In this chapter you will also write your first lines of Python — "
-            "using variables to store information and print() to display it."
+            "Robby the Robot is trying to enter the cafe kitchen. His starting "
+            "position is at one side of the room, and the kitchen is on the other "
+            "side — separated by a long white wall with a door at each end.\n\n"
+            "Robby will travel straight towards the wall. You need to program Robby "
+            "to stop in front of the wall instead of hitting it. Then turn and travel "
+            "along the wall towards one of the doors at the edge.\n\n"
+            "In this chapter you will use conditional statements — if, elif, and else "
+            "— to give Robby the ability to sense his surroundings and make decisions "
+            "about what to do next."
         ),
         "missions": [
             {
                 "id":          "Mission 1",
-                "title":       "print() — Robby Says Hello",
+                "title":       "if — Stop Before the Wall",
                 "description": (
-                    "Python Concept: print()\n\n"
-                    "print() displays text on the screen. Anything inside the "
-                    "brackets and quotes is shown as output.\n\n"
-                    "Step 1 — Open the Code Editor (click the Code Editor button).\n"
-                    "Step 2 — The starter code is already loaded. Read it, then "
-                    "click Run to execute it.\n"
-                    "Step 3 — Try changing the message inside the quotes to "
-                    "something different and Run again.\n"
-                    "Step 4 — Drive Robby to the green circle (the coffee counter) "
-                    "using the A W D S keys to complete the mission."
+                    "Python Concept: if statement\n\n"
+                    "An if statement runs a block of code only when a condition is "
+                    "True. Use distance(0) to read how far ahead the nearest obstacle "
+                    "is (0 = straight ahead).\n\n"
+                    "    if distance(0) > 1.0:\n"
+                    "        drive(1, 0)   # move forward\n"
+                    "    else:\n"
+                    "        drive(0, 0)   # stop\n\n"
+                    "Step 1 — Open the Code Editor and read the starter code.\n"
+                    "Step 2 — Enable 'Run forever' so the code loops continuously.\n"
+                    "Step 3 — Click Run and watch Robby approach the wall.\n"
+                    "Step 4 — Adjust the threshold value until Robby stops safely "
+                    "inside the yellow zone in front of the wall."
                 ),
-                "trigger":     {"type": "enter", "zone": "PickupZone"},
+                "trigger": {"type": "enter", "zone": "WallApproachZone"},
                 "script": (
-                    "# Mission 1: print() — Show a message on the screen\n"
+                    "# Mission 1: if — Stop before the wall\n"
                     "#\n"
-                    "# print() is a built-in Python function.\n"
-                    "# Whatever you put inside the brackets is displayed as output.\n"
+                    "# distance(0) returns how far ahead the nearest obstacle is.\n"
+                    "# Use an if/else to drive forward or stop.\n"
+                    "#\n"
+                    "# Enable 'Run forever' before clicking Run.\n"
                     "\n"
-                    "print(\"Hello! I am Robby the Robot.\")\n"
-                    "print(\"I am ready to deliver coffee!\")\n"
+                    "if distance(0) > 1.0:\n"
+                    "    drive(1, 0)    # drive forward — path is clear\n"
+                    "else:\n"
+                    "    drive(0, 0)   # stop — wall is too close!\n"
                     "\n"
-                    "# Try changing the text above, then click Run again.\n"
-                    "# When you are done, drive to the green circle using A W D S."
+                    "# Try changing 1.0 to a different number.\n"
+                    "# Goal: stop Robby inside the yellow circle."
                 ),
             },
             {
                 "id":          "Mission 2",
-                "title":       "Variables — Store the Order",
+                "title":       "elif — Turn and Find the Left Door",
                 "description": (
-                    "Python Concept: Variables\n\n"
-                    "A variable is a named container that stores a value. "
-                    "You create one using the = sign (called the assignment operator).\n\n"
-                    "    order = \"Coffee\"\n\n"
-                    "Here, order is the variable name and \"Coffee\" is the value "
-                    "stored inside it. You can then use the variable name anywhere "
-                    "you would use the value.\n\n"
-                    "Step 1 — Read the starter code in the Editor.\n"
-                    "Step 2 — Click Run to see the output.\n"
-                    "Step 3 — Change the variable value to a different drink name "
-                    "and Run again to see how the output changes.\n"
-                    "Step 4 — Click Attach to pick up the coffee cup."
+                    "Python Concept: if / elif / else\n\n"
+                    "elif (short for 'else if') lets you check a second condition "
+                    "when the first one is False. You can chain as many elif blocks "
+                    "as you need.\n\n"
+                    "    if distance(0) > 1.0:\n"
+                    "        drive(1, 0)       # clear ahead — go forward\n"
+                    "    elif distance(270) > 1.5:\n"
+                    "        drive(0.3, -0.4)  # wall close — turn left\n"
+                    "    else:\n"
+                    "        drive(1, 0)       # in doorway — drive through\n\n"
+                    "Note: distance(270) reads to the left of the robot.\n\n"
+                    "Step 1 — Read and run the starter code with 'Run forever' on.\n"
+                    "Step 2 — Adjust the turn direction and speed until Robby "
+                    "navigates around the left end of the wall.\n"
+                    "Step 3 — Guide Robby into the blue circle (left door) to "
+                    "complete the mission."
                 ),
-                "trigger":     {"type": "attach", "zone": "PickupZone", "object": "CoffeeCup"},
+                "trigger": {"type": "enter", "zone": "LeftDoorZone"},
                 "script": (
-                    "# Mission 2: Variables — Store a value with a name\n"
+                    "# Mission 2: elif — Turn and reach the left door\n"
                     "#\n"
-                    "# A variable stores a value so you can use it later.\n"
-                    "# Syntax:  variable_name = value\n"
+                    "# distance(270) = distance to the LEFT of Robby.\n"
+                    "# Add an elif to turn when the wall blocks the path ahead.\n"
+                    "#\n"
+                    "# Enable 'Run forever' before clicking Run.\n"
                     "\n"
-                    "order = \"Coffee\"           # str (text) variable\n"
-                    "table = 1                   # int (whole number) variable\n"
+                    "if distance(0) > 1.0:\n"
+                    "    drive(1, 0)        # clear ahead — go forward\n"
+                    "elif distance(270) > 1.5:\n"
+                    "    drive(0.3, -0.4)   # wall ahead — turn left\n"
+                    "else:\n"
+                    "    drive(1, 0)        # in doorway — drive through\n"
                     "\n"
-                    "print(\"Order:\", order)\n"
-                    "print(\"Deliver to table:\", table)\n"
-                    "\n"
-                    "# Try changing the values above and Run again.\n"
-                    "# Then click Attach to pick up the coffee cup."
+                    "# Goal: guide Robby into the blue circle (left door)."
                 ),
             },
             {
                 "id":          "Mission 3",
-                "title":       "f-strings — Format the Delivery Message",
+                "title":       "Boolean Expressions — Choose Your Door",
                 "description": (
-                    "Python Concept: f-strings\n\n"
-                    "An f-string lets you insert variable values directly inside "
-                    "a string. Put f before the opening quote, then wrap the "
-                    "variable name in curly braces { }.\n\n"
-                    "    name = \"Alice\"\n"
-                    "    print(f\"Hello, {name}!\")\n"
-                    "    # Output: Hello, Alice!\n\n"
-                    "Step 1 — Read and run the starter code.\n"
-                    "Step 2 — Change customer and table to different values and "
-                    "Run again.\n"
-                    "Step 3 — Carry the coffee to the orange circle (customer's "
-                    "table) using A W D S to complete the mission."
+                    "Python Concept: Boolean expressions\n\n"
+                    "A Boolean expression compares two values and produces True or "
+                    "False. You can combine conditions using and, or, and not.\n\n"
+                    "    if distance(0) > 1.0 and distance(90) > 1.0:\n"
+                    "        drive(1, 0.4)   # clear ahead AND to the right\n\n"
+                    "In this mission, start from the left door and navigate to the "
+                    "right door using combined conditions.\n\n"
+                    "Step 1 — Run the starter code with 'Run forever' on.\n"
+                    "Step 2 — Modify the conditions to navigate along the wall "
+                    "from the left side to the right side.\n"
+                    "Step 3 — Reach the green circle (right door) to complete "
+                    "the chapter."
                 ),
-                "trigger":     {"type": "enter_with", "zone": "Table1Zone", "object": "CoffeeCup"},
+                "trigger": {"type": "enter", "zone": "RightDoorZone"},
                 "script": (
-                    "# Mission 3: f-strings — Embed variables inside text\n"
+                    "# Mission 3: Boolean expressions — Navigate to the right door\n"
                     "#\n"
-                    "# An f-string starts with f before the quote.\n"
-                    "# Variables go inside curly braces { }.\n"
-                    "\n"
-                    "order    = \"Coffee\"\n"
-                    "table    = 1\n"
-                    "customer = \"Alice\"\n"
-                    "\n"
-                    "print(f\"Delivering {order} to table {table} for {customer}.\")\n"
-                    "\n"
-                    "# Try changing the variables, then Run again.\n"
-                    "# Drive to the orange circle to complete the mission."
-                ),
-            },
-            {
-                "id":          "Mission 4",
-                "title":       "Updating Variables — Count Deliveries",
-                "description": (
-                    "Python Concept: Updating variables\n\n"
-                    "A variable's value can be changed at any time by assigning "
-                    "a new value to it.\n\n"
-                    "    deliveries = 0\n"
-                    "    deliveries = deliveries + 1   # now equals 1\n\n"
-                    "You can also write this with a shortcut:\n\n"
-                    "    deliveries += 1\n\n"
-                    "Step 1 — Run the starter code and read the output.\n"
-                    "Step 2 — Change the starting value of deliveries and Run "
-                    "again to see how the final output changes.\n"
-                    "Step 3 — Click Detach to set the coffee down for the customer."
-                ),
-                "trigger":     {"type": "detach", "zone": "Table1Zone", "object": "CoffeeCup"},
-                "script": (
-                    "# Mission 4: Updating variables\n"
+                    "# Use 'and' / 'or' to combine conditions.\n"
+                    "# distance(90) = distance to the RIGHT of Robby.\n"
                     "#\n"
-                    "# Variables can be reassigned — their value can change.\n"
+                    "# Enable 'Run forever' before clicking Run.\n"
                     "\n"
-                    "deliveries = 0              # starting value\n"
-                    "print(f\"Deliveries so far: {deliveries}\")\n"
+                    "if distance(0) > 1.0 and distance(90) > 1.5:\n"
+                    "    drive(1, 0.4)    # clear ahead and right — curve right\n"
+                    "elif distance(0) > 1.0:\n"
+                    "    drive(1, 0)      # clear ahead — go straight\n"
+                    "else:\n"
+                    "    drive(0, 0.5)    # blocked ahead — turn right\n"
                     "\n"
-                    "deliveries = deliveries + 1 # add 1\n"
-                    "print(f\"After this delivery: {deliveries}\")\n"
-                    "\n"
-                    "# Shortcut: deliveries += 1 does the same thing.\n"
-                    "# Try it! Then click Detach to set down the coffee."
-                ),
-            },
-            {
-                "id":          "Mission 5",
-                "title":       "input() — Ask the Customer's Name",
-                "description": (
-                    "Python Concept: input()\n\n"
-                    "input() pauses the program and waits for the user to type "
-                    "something. The typed text is returned as a string and can be "
-                    "stored in a variable.\n\n"
-                    "    name = input(\"What is your name? \")\n"
-                    "    print(f\"Hello, {name}!\")\n\n"
-                    "Note: input() works in a terminal or Python shell. In the "
-                    "robot editor the starter code uses a preset value so the "
-                    "simulation does not freeze — but the concept is the same.\n\n"
-                    "Step 1 — Run the starter code and read the output.\n"
-                    "Step 2 — Change the value of customer_name and Run again.\n"
-                    "Step 3 — Click Attach to pick up the dirty plate."
-                ),
-                "trigger":     {"type": "attach", "zone": "Table1Zone", "object": "DirtyPlate"},
-                "script": (
-                    "# Mission 5: input() — Read a value from the user\n"
-                    "#\n"
-                    "# In a real program you would write:\n"
-                    "#   customer_name = input(\"Enter customer name: \")\n"
-                    "#\n"
-                    "# In the robot editor we assign a preset value instead,\n"
-                    "# because input() would pause the simulation.\n"
-                    "\n"
-                    "customer_name = \"Alex\"      # try changing this name\n"
-                    "\n"
-                    "print(f\"Thank you, {customer_name}!\")\n"
-                    "print(f\"Collecting your plate now.\")\n"
-                    "\n"
-                    "# Then click Attach to pick up the dirty plate."
-                ),
-            },
-            {
-                "id":          "Mission 6",
-                "title":       "Putting It Together — Return to Kitchen",
-                "description": (
-                    "Python Review: variables, print(), f-strings, input()\n\n"
-                    "In this final mission you will write your own code from "
-                    "scratch to combine everything you have learned.\n\n"
-                    "Step 1 — Fill in the blanks in the starter code.\n"
-                    "Step 2 — Run your code and check the output makes sense.\n"
-                    "Step 3 — Carry the dirty plate to the blue circle "
-                    "(kitchen hatch) using A W D S to complete the chapter."
-                ),
-                "trigger":     {"type": "enter_with", "zone": "KitchenZone", "object": "DirtyPlate"},
-                "script": (
-                    "# Mission 6: Write your own code!\n"
-                    "#\n"
-                    "# Fill in the blanks (___) to complete the program.\n"
-                    "\n"
-                    "robot_name   = ___           # your robot's name (a string)\n"
-                    "item         = ___           # what you are carrying\n"
-                    "destination  = \"Kitchen\"    # where you are going\n"
-                    "\n"
-                    "print(f\"{robot_name} is returning the {item} to the {destination}.\")\n"
-                    "print(\"Mission complete! Great work today.\")\n"
-                    "\n"
-                    "# Once the output looks right, drive to the blue circle."
+                    "# Goal: guide Robby into the green circle (right door)."
                 ),
             },
         ],
         "learning_outcomes": (
-            "1. Student understands what a variable is and how to assign one.\n"
-            "2. Student can use print() to display text and variable values.\n"
-            "3. Student can use f-strings to embed variables inside text.\n"
-            "4. Student understands how to update a variable's value.\n"
-            "5. Student understands how input() reads user input at runtime.\n"
-            "6. Student recognises the basic data types: str, int, float."
+            "1. Student can write an if/else statement to make a decision based on "
+            "sensor data — e.g., stopping Robby before he hits the wall using "
+            "distance().\n"
+            "2. Student understands if/elif/else chains and can use them to handle "
+            "multiple conditions — e.g., deciding whether to drive forward, turn, "
+            "or stop depending on what Robby's sensors detect.\n"
+            "3. Student can construct Boolean expressions using comparison operators "
+            "(<, >, ==) and logical operators (and, or, not) to describe real-world "
+            "conditions in code."
         ),
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 2 ─────────────────────────────────────────────────────────────
     {
         "number":     2,
-        "title":      "Formatted Print",
+        "title":      "Variables",
         "subtitle":   "Presenting output clearly and professionally.",
         "status":     "available",
         "world_file": "",
@@ -334,13 +258,13 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 3 ─────────────────────────────────────────────────────────────
     {
         "number":     3,
-        "title":      "Conditional Statements",
+        "title":      "Loops",
         "subtitle":   "Teaching your program to make decisions.",
         "status":     "available",
         "world_file": "",
@@ -348,13 +272,13 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 4 ─────────────────────────────────────────────────────────────
     {
         "number":     4,
-        "title":      "Loops",
+        "title":      "Functions",
         "subtitle":   "Repeating actions efficiently.",
         "status":     "available",
         "world_file": "",
@@ -362,13 +286,13 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 5 ─────────────────────────────────────────────────────────────
     {
         "number":     5,
-        "title":      "Data Structures",
+        "title":      "List Processing",
         "subtitle":   "Lists and Dictionaries.",
         "status":     "available",
         "world_file": "",
@@ -376,13 +300,13 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 6 ─────────────────────────────────────────────────────────────
     {
         "number":     6,
-        "title":      "Functions",
+        "title":      "Algorithms",
         "subtitle":   "Writing reusable blocks of code.",
         "status":     "available",
         "world_file": "",
@@ -390,13 +314,13 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 7 ─────────────────────────────────────────────────────────────
     {
         "number":     7,
-        "title":      "List Processing",
+        "title":      "Recursion",
         "subtitle":   "Working with collections of data.",
         "status":     "available",
         "world_file": "",
@@ -404,13 +328,13 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 8 ─────────────────────────────────────────────────────────────
     {
         "number":     8,
-        "title":      "Algorithms",
+        "title":      "Evaluation",
         "subtitle":   "Searching, Sorting, Counting and Math algorithms.",
         "status":     "available",
         "world_file": "",
@@ -418,7 +342,7 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 9 ─────────────────────────────────────────────────────────────
@@ -432,7 +356,7 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 
     # ── Chapter 10 ────────────────────────────────────────────────────────────
@@ -446,6 +370,6 @@ CHAPTERS = [
         "story":      "Content coming soon.",
         "missions":   [],
         "learning_outcomes": "",
-        "educator_notes":  "Enter your teacher notes here.",
+        "educator_notes":  "Enter your notes here.",
     },
 ]
