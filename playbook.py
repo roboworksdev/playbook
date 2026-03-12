@@ -10,9 +10,10 @@ import time
 import urllib.request
 import urllib.error
 
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer, QRegularExpression
 from PyQt6.QtGui import (
     QBrush, QColor, QFont, QPalette, QPainter, QPainterPath, QPen, QPixmap, QIcon,
+    QSyntaxHighlighter, QTextCharFormat,
 )
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame,
@@ -148,6 +149,115 @@ class CollapsibleSection(QWidget):
             self._toggle()
 
 
+# ─── PythonHighlighter ────────────────────────────────────────────────────────
+
+class PythonHighlighter(QSyntaxHighlighter):
+    """VS Code dark-theme syntax highlighting for Python code."""
+
+    _KEYWORDS = [
+        "False", "None", "True", "and", "as", "assert", "async", "await",
+        "break", "class", "continue", "def", "del", "elif", "else", "except",
+        "finally", "for", "from", "global", "if", "import", "in", "is",
+        "lambda", "nonlocal", "not", "or", "pass", "raise", "return",
+        "try", "while", "with", "yield",
+    ]
+    _BUILTINS = [
+        "abs", "all", "any", "bin", "bool", "bytes", "callable", "chr",
+        "dict", "dir", "divmod", "enumerate", "eval", "exec", "filter",
+        "float", "format", "frozenset", "getattr", "globals", "hasattr",
+        "hash", "hex", "id", "input", "int", "isinstance", "issubclass",
+        "iter", "len", "list", "locals", "map", "max", "min", "next",
+        "object", "oct", "open", "ord", "pow", "print", "property",
+        "range", "repr", "reversed", "round", "set", "setattr", "slice",
+        "sorted", "staticmethod", "str", "sum", "super", "tuple", "type",
+        "vars", "zip",
+    ]
+
+    def __init__(self, document):
+        super().__init__(document)
+        self._rules = []
+
+        # Keywords — VS Code purple #C586C0
+        kw_fmt = QTextCharFormat()
+        kw_fmt.setForeground(QColor("#C586C0"))
+        for kw in self._KEYWORDS:
+            self._rules.append((QRegularExpression(r'\b' + kw + r'\b'), kw_fmt))
+
+        # Built-ins — VS Code yellow #DCDCAA
+        bi_fmt = QTextCharFormat()
+        bi_fmt.setForeground(QColor("#DCDCAA"))
+        for bi in self._BUILTINS:
+            self._rules.append((QRegularExpression(r'\b' + bi + r'\b'), bi_fmt))
+
+        # Strings (single and double quoted) — VS Code orange #CE9178
+        str_fmt = QTextCharFormat()
+        str_fmt.setForeground(QColor("#CE9178"))
+        self._rules.append((QRegularExpression(r'"[^"\\]*(\\.[^"\\]*)*"'), str_fmt))
+        self._rules.append((QRegularExpression(r"'[^'\\]*(\\.[^'\\]*)*'"), str_fmt))
+
+        # Numbers — VS Code light green #B5CEA8
+        num_fmt = QTextCharFormat()
+        num_fmt.setForeground(QColor("#B5CEA8"))
+        self._rules.append((QRegularExpression(r'\b\d+\.?\d*\b'), num_fmt))
+
+        # Comments — VS Code green #6A9955 (applied last to override all)
+        self._cmt_fmt = QTextCharFormat()
+        self._cmt_fmt.setForeground(QColor("#6A9955"))
+        self._cmt_fmt.setFontItalic(True)
+        self._cmt_pattern = QRegularExpression(r'#[^\n]*')
+
+    def highlightBlock(self, text: str):
+        for pattern, fmt in self._rules:
+            it = pattern.globalMatch(text)
+            while it.hasNext():
+                m = it.next()
+                self.setFormat(m.capturedStart(), m.capturedLength(), fmt)
+        # Comments override everything
+        it = self._cmt_pattern.globalMatch(text)
+        while it.hasNext():
+            m = it.next()
+            self.setFormat(m.capturedStart(), m.capturedLength(), self._cmt_fmt)
+
+
+# ─── DropZoneWidget ───────────────────────────────────────────────────────────
+
+class DropZoneWidget(QWidget):
+    """A painted coloured circle representing a named drop-zone."""
+
+    _COLOUR_MAP = {
+        "green":  "#30D158",
+        "yellow": "#FFD60A",
+        "red":    "#FF453A",
+        "blue":   "#0A84FF",
+        "purple": "#BF5AF2",
+        "orange": "#FF9F0A",
+        "cyan":   "#64D2FF",
+        "white":  "#EBEBF0",
+    }
+
+    def __init__(self, zone_name: str, size: int = 16, parent=None):
+        super().__init__(parent)
+        self._color = self._zone_color(zone_name)
+        self.setFixedSize(size, size)
+        self.setToolTip(zone_name)
+
+    @classmethod
+    def _zone_color(cls, zone_name: str) -> str:
+        name_lower = zone_name.lower()
+        for key, val in cls._COLOUR_MAP.items():
+            if name_lower.startswith(key):
+                return val
+        return "#8E8E93"  # neutral grey for unnamed zones
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(self._color)))
+        m = 1
+        painter.drawEllipse(m, m, self.width() - 2 * m, self.height() - 2 * m)
+
+
 # ─── MissionRow ───────────────────────────────────────────────────────────────
 
 _BTN_WHITE = f"""
@@ -198,6 +308,11 @@ class MissionRow(QWidget):
         title_lbl.setFont(QFont("Helvetica Neue", 20 + font_delta, QFont.Weight.Medium))
         title_lbl.setStyleSheet(f"color: {C_TEXT};")
         top.addWidget(title_lbl, stretch=1)
+
+        zone = mission.get("trigger", {}).get("zone", "")
+        if zone:
+            dz = DropZoneWidget(zone, size=16)
+            top.addWidget(dz)
 
         if self._script:
             open_btn = QPushButton("Starter Code ▶")
@@ -326,6 +441,8 @@ class ScriptPanel(QWidget):
         """)
         self._viewer.setMinimumHeight(260)
         layout.addWidget(self._viewer)
+
+        self._highlighter = PythonHighlighter(self._viewer.document())
 
         self._current_path = ""
 
